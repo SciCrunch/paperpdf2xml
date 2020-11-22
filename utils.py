@@ -99,7 +99,7 @@ def is_heading(line, nlp):
     if ll in headings_set:
         return (True, True)
 
-    if utils.is_mostly_numbers(line):
+    if is_mostly_numbers(line):
         return False, False
 
     for doc in nlp.pipe([line], disable=['ner', 'parser']):
