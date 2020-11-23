@@ -1,7 +1,9 @@
 import re
+import argparse
 
 from xml.etree.ElementTree import Element, SubElement
 import xml.etree.ElementTree as ET
+import utils
 
 class BBox(object):
     def __init__(self, y0, x0, y1, x1, node):
@@ -173,7 +175,7 @@ def collect_text(node, lines):
             lines[-1].append(node.text)
 
 
-def cluster_bboxes(bbox_list):
+def cluster_bboxes(bbox_list, top_el=None):
     clusters = []
     for bbox in bbox_list:
         closest = None
@@ -202,10 +204,18 @@ def cluster_bboxes(bbox_list):
         print("Left Column Cluster {} - members:{} {}".format(ct[0].label, len(ct[0].members), ct[0]))
         print("Right  Column Cluster {} - members:{} {}".format(ct[1].label, len(ct[1].members), ct[1]))
 
+        content = ""
         print("Left Column\n---------\n")
-        print(ct[0].get_text())
+        col_text = ct[0].get_text()
+        content += col_text
+        print(col_text)
         print("\nRight Column\n---------\n")
-        print(ct[1].get_text())
+        col_text = ct[1].get_text()
+        content += col_text
+        print(col_text)
+        if top_el is not None:
+            page_el = SubElement(top_el, 'page')
+            page_el.text = content
 
     print('-'*80)
 
@@ -224,7 +234,7 @@ def find_columns(clusters):
 
 
 
-def handle_page(node, num_cols=2):
+def handle_page(node, num_cols=2, top_el=None):
     bbox_list = []
     for child in node:
         if child.tag != 'div':
@@ -232,12 +242,35 @@ def handle_page(node, num_cols=2):
         bbox = BBox.from_node(child)
         bbox_list.append(bbox)
     print('# boxes:', len(bbox_list))
-    cluster_bboxes(bbox_list)
+    cluster_bboxes(bbox_list, top_el=top_el)
+
+
+def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument('-i', action='store', help="input HOCR html file", required=True)
+    parser.add_argument('-o', action='store', help="output text XML file", required=True)
+
+    args  = parser.parse_args()
+
+    hocr_file = args.i
+    out_xml_file = args.o
+    tree = ET.parse(hocr_file)
+    top = Element('pdf')
+    for node in tree.findall('.//body/div'):
+        handle_page(node, top_el=top)
+    utils.indent(top)
+    out_tree = ET.ElementTree(top)
+    out_tree.write(out_xml_file, encoding="UTF-8")
+    print("wrote file:", out_xml_file)
 
 
 
-tree = ET.parse('x.html')
-for node in tree.findall('.//body/div'):
-    print (node.attrib)
-    handle_page(node)
+def test_driver():
+    tree = ET.parse('x.html')
+    for node in tree.findall('.//body/div'):
+        print (node.attrib)
+        handle_page(node)
 
+
+if __name__ == '__main__':
+    main()
