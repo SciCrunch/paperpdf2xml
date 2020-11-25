@@ -64,6 +64,36 @@ def is_mostly_numbers(line):
     return False
 
 
+def is_figure_text(line_toks, nlp):
+    if len(line_toks) >= 5:
+        return False
+    has_title_case = False
+    has_verb  = False
+    num_nouns = 0
+    has_period = False
+    line = " ".join(line_toks)
+    if is_mostly_numbers(line):
+        return True
+    for doc in nlp.pipe([line], disable=['ner', 'parser']):
+        num_tokens = len(doc)
+        for i, token in enumerate(doc):
+            if token.text == '.':
+                has_period = True
+            m = re.match(r'^X[x]+$', token.shape_)
+            if i == 0 and m:
+                has_title_case = True
+            if token.tag_.startswith('VB'):
+                has_verb = True
+            if token.tag_.startswith('NN'):
+                num_nouns += 1
+
+    noun_frac = num_nouns / float(num_tokens)
+    if not has_verb and not has_period and noun_frac >= 0.5:
+        return True
+    return False
+
+
+
 def is_heading(line, nlp):
     if isempty(line):
         return (False, False)
@@ -79,7 +109,8 @@ def is_heading(line, nlp):
     alpha_sec_pat = re.compile(r'(\^[abcdefg]\.\s*)')
     headings_set = {"abstract", "introduction", "background", "methods",
                     "materials and methods", "discussion", "conclusions",
-                    "references", "acknowledgements", "online methods"}
+                    "references", "acknowledgements", "online methods",
+                    "bibliography"}
     m = sec_num_pat.match(line)
     if m:
         prefix = m.group(1)

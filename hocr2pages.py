@@ -3,6 +3,7 @@ import argparse
 
 from xml.etree.ElementTree import Element, SubElement
 import xml.etree.ElementTree as ET
+import spacy
 import utils
 
 class BBox(object):
@@ -100,7 +101,7 @@ class Cluster(object):
         return self.y0min <= ymid and self.y1max >= ymid and self.x0min <= xmid and self.x1max >= xmid
 
 
-    def get_text(self):
+    def get_text(self, nlp=None):
         lines = []
         for m in self.members:
             collect_text(m.node, lines)
@@ -114,11 +115,53 @@ class Cluster(object):
                 line[-1] =  line[-1][:-1] + lines[i+1][0]
                 del lines[i+1][0]
 
+        if nlp:
+            lines = clean_figure_text(lines, nlp, from_top=True)
+            lines = clean_figure_text(lines, nlp, from_top=False)
 
         content = ""
         for line in lines:
             content += " ".join(line) + "\n"
+        content = sanitize(content)
         return content
+
+
+def sanitize(content):
+    content = content.replace("\uFB02 ",'fl')
+    content = content.replace("\uFB01 ",'fi')
+    content = content.replace("\uFB02",'fl')
+    content = content.replace("\uFB01 ",'fi')
+    return content
+
+
+def clean_figure_text(lines, nlp,  from_top=True):
+    if len(lines) == 0:
+        return lines
+    removed = []
+    if from_top:
+        i = 0
+        while i < len(lines):
+            if utils.is_figure_text(lines[i], nlp):
+                removed.append(i)
+            else:
+                break
+            i += 1
+    else:
+        i = len(lines) -1
+        while i >= 0:
+            if utils.is_figure_text(lines[i], nlp):
+                removed.append(i)
+            else:
+                break
+            i -= 1
+    if len(removed) == 0:
+        return lines
+    filtered = []
+    for i, line in enumerate(lines):
+        if i not in removed:
+            filtered.append(line)
+    return filtered
+
 
 def remove_figure_captions(content):
     p = re.compile(r"^Figure\s+\d+(?:-\d+)\s+[A-Z].+(\n?.+)?\.", re.MULTILINE)
@@ -148,6 +191,13 @@ def is_eligible(node):
     return attr != 'figure_caption' and attr != 'header'
 
 
+def is_figure_caption(node):
+    if 'pdftotree' not in node.attrib:
+        return False
+    attr = node.attrib['pdftotree']
+    return attr == 'figure_caption'
+
+
 def collect_all_text(node, lines):
     if  node.tag == 'div':
         for child in node:
@@ -166,6 +216,8 @@ def collect_text(node, lines):
        if is_eligible(node):
            for child in node:
                collect_text(child, lines)
+       elif is_figure_caption(node):
+            lines.append(['FIGURE_CAPTION'])
     elif node.tag == 'span':
         if node.attrib['class'] == 'ocrx_line':
             lines.append([])
@@ -175,7 +227,7 @@ def collect_text(node, lines):
             lines[-1].append(node.text)
 
 
-def cluster_bboxes(bbox_list, top_el=None):
+def cluster_bboxes(bbox_list, top_el=None, nlp=None):
     clusters = []
     for bbox in bbox_list:
         closest = None
@@ -206,11 +258,11 @@ def cluster_bboxes(bbox_list, top_el=None):
 
         content = ""
         print("Left Column\n---------\n")
-        col_text = ct[0].get_text()
+        col_text = ct[0].get_text(nlp=nlp)
         content += col_text
         print(col_text)
         print("\nRight Column\n---------\n")
-        col_text = ct[1].get_text()
+        col_text = ct[1].get_text(nlp=nlp)
         content += col_text
         print(col_text)
         if top_el is not None:
@@ -234,7 +286,7 @@ def find_columns(clusters):
 
 
 
-def handle_page(node, num_cols=2, top_el=None):
+def handle_page(node, num_cols=2, top_el=None, nlp=None):
     bbox_list = []
     for child in node:
         if child.tag != 'div':
@@ -242,7 +294,7 @@ def handle_page(node, num_cols=2, top_el=None):
         bbox = BBox.from_node(child)
         bbox_list.append(bbox)
     print('# boxes:', len(bbox_list))
-    cluster_bboxes(bbox_list, top_el=top_el)
+    cluster_bboxes(bbox_list, top_el=top_el, nlp=nlp)
 
 
 def main():
@@ -254,10 +306,12 @@ def main():
 
     hocr_file = args.i
     out_xml_file = args.o
+    nlp = spacy.load("en_core_web_sm")
+    print("loaded spacy.")
     tree = ET.parse(hocr_file)
     top = Element('pdf')
     for node in tree.findall('.//body/div'):
-        handle_page(node, top_el=top)
+        handle_page(node, top_el=top, nlp=nlp)
     utils.indent(top)
     out_tree = ET.ElementTree(top)
     out_tree.write(out_xml_file, encoding="UTF-8")
