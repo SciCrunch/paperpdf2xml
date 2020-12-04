@@ -1,4 +1,5 @@
 import spacy
+import keras
 from keras.models import Sequential
 from keras.layers import Dense, Dropout, Flatten
 from keras.layers import LSTM
@@ -7,6 +8,7 @@ from keras.models import Model
 import numpy as np
 from xml.etree.ElementTree import Element, SubElement
 import xml.etree.ElementTree as ET
+from os.path import expanduser
 
 from glove_handler import GloveHandler
 
@@ -26,6 +28,7 @@ class Section(object):
         tokens = []
         window = []
         has_last = True
+        i = line_idx
         if i == 0:
             if self.prev_line:
                 window.append(self.prev_line)
@@ -66,12 +69,38 @@ class Section(object):
 
 
 def extract_sections(xml_file):
-    sections = []
+    page_sections = {}
+    training_sections = []
     tree = ET.parse(xml_file)
+    count = 0
     for node in tree.findall('.//page'):
+        sections = []
         handle_page(node, sections)
         print("# of sections: {}".format(len(sections)))
-    return sections
+        if has_bad_sections(sections):
+            training_sections.extend(sections)
+        page_sections[count] = sections
+        count +=1
+    return training_sections
+
+
+def extract_page_sections(xml_file):
+    page_sections = {}
+    tree = ET.parse(xml_file)
+    count = 0
+    for node in tree.findall('.//page'):
+        sections = []
+        handle_page(node, sections)
+        page_sections[count] = sections
+        count +=1
+    return page_sections
+
+
+def has_bad_sections(sections):
+    for section in sections:
+        if section.sec_type == 'bad':
+            return True
+    return False
 
 
 def handle_page(node, sections):
@@ -92,11 +121,12 @@ def handle_page(node, sections):
                if lines[j].endswith('{junk}'):
                    j += 1
                    break
-               elif j+1 < num_lines:
+               elif j+1 >= num_lines:
                    break
                j += 1
            next_line = lines[j] if j < num_lines else None
-           section = Section('bad', lines[i:j], prev_line, next_line)
+           body = [l.replace('{junk}','') for l in  lines[i:j]]
+           section = Section('bad', body, prev_line, next_line)
            sections.append(section)
            offset = j
            i = offset
@@ -112,6 +142,20 @@ def create_before_section(i, offset, lines, sec_type):
     prev_line = lines[offset-1] if offset > 0 else None
     next_line = lines[i] if i < len(lines) else None
     return Section(sec_type, lines[offset:i], prev_line, next_line)
+
+
+def prepare_section_tr_data(training_sections, nlp, max_length):
+    data, labels = [], []
+    for section in training_sections:
+        num_lines = section.size()
+        label  = 1 if section.sec_type == 'good' else 0
+        for i in range(num_lines):
+            instance = section.get_context_window(i, nlp)
+            if len(instance) > max_length:
+                instance = instance[0:max_length]
+            data.append(instance)
+            labels.append(label)
+    return data, np.array(labels)
 
 
 def prep_data(data, max_length, glove_handler, gv_dim=100):
@@ -141,12 +185,65 @@ def build_LSTM_model(gv_dim=100, max_length=100):
     return model
 
 
-def train_model(train_X, train_labels, max_length=100):
+def train_model(train_X, train_labels, max_length=100, gv_dim=100):
+    train_X = train_X.reshape(len(train_labels), max_length, gv_dim)
     model = build_LSTM_model(max_length=max_length)
     result = model.fit(train_X, train_labels, epochs=20, batch_size=32,
                        validation_split=0.1)
     print(result.history)
 
 
+def train_model_full(train_X, train_labels, max_length=100, gv_dim=100):
+    train_X = train_X.reshape(len(train_labels), max_length, gv_dim)
+    model = build_LSTM_model(max_length=max_length)
+    result = model.fit(train_X, train_labels, epochs=20, batch_size=32)
+    print(result.history)
+    model.save('junk_remover_model.h5')
 
-extract_sections('3_Cholinergic_Receptors.xml')
+
+def train(data, labels, max_length, glove_handler, gv_dim=100):
+    Xs = prep_data(data, max_length, glove_handler, gv_dim=gv_dim)
+    train_model(Xs, labels, max_length=max_length, gv_dim=gv_dim)
+
+
+def train_full(data, labels, max_length, glove_handler, gv_dim=100):
+    Xs = prep_data(data, max_length, glove_handler, gv_dim=gv_dim)
+    train_model_full(Xs, labels, max_length=max_length, gv_dim=gv_dim)
+
+
+def filter(xml_file, nlp, glove_handler, threshold = 0.5):
+    max_length = 100
+    gv_dim = 100
+    #model = build_LSTM_model(max_length=max_length)
+    #model.load('junk_remover_model.h5')
+    model = keras.models.load_model('junk_remover_model.h5')
+    # model._make_predict_function()
+    page_sections = extract_page_sections(xml_file)
+    for page_idx, sections in page_sections.items():
+        assert len(sections) == 1
+        data, labels = prepare_section_tr_data(sections, nlp, max_length)
+        pred_X = prep_data(data, max_length, glove_handler, gv_dim=gv_dim)
+        pred_X = pred_X.reshape(len(labels), max_length, gv_dim)
+        y_preds = model.predict(pred_X)
+        lines = sections[0].lines
+        for i, ypred in enumerate(y_preds):
+            if ypred > threshold:
+                print(lines[i])
+        print('-'*80)
+    print('done.')
+
+
+if __name__ == '__main__':
+    home = expanduser("~")
+    db_file = home + "/medline_glove_v2.db"
+    # extract_sections('3_Cholinergic_Receptors.xml')
+    training_sections = extract_sections('SECTION_VI_THE_URINARY_SYSTEM.xml')
+    nlp = spacy.load("en_core_web_sm")
+    print("loaded spacy.")
+    glove_handler = GloveHandler(db_file)
+    max_length= 100
+    # data, labels = prepare_section_tr_data(training_sections, nlp, max_length)
+    # train_full(data, labels, max_length, glove_handler)
+    filter('SECTION_V_THE_RESPIRATORY_SYSTEM.xml', nlp, glove_handler)
+
+

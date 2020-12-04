@@ -87,7 +87,7 @@ def is_figure_text(line_toks, nlp):
             if token.tag_.startswith('NN'):
                 num_nouns += 1
 
-    noun_frac = num_nouns / float(num_tokens)
+    noun_frac = num_nouns / float(num_tokens) if num_tokens > 0 else 0
     if not has_verb and not has_period and noun_frac >= 0.5:
         return True
     return False
