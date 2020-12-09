@@ -1,3 +1,4 @@
+import argparse
 import spacy
 import keras
 from keras.models import Sequential
@@ -11,6 +12,7 @@ import xml.etree.ElementTree as ET
 from os.path import expanduser
 
 from glove_handler import GloveHandler
+import utils
 
 
 class Section(object):
@@ -193,12 +195,13 @@ def train_model(train_X, train_labels, max_length=100, gv_dim=100):
     print(result.history)
 
 
-def train_model_full(train_X, train_labels, max_length=100, gv_dim=100):
+def train_model_full(train_X, train_labels, model_file, max_length=100, gv_dim=100):
     train_X = train_X.reshape(len(train_labels), max_length, gv_dim)
     model = build_LSTM_model(max_length=max_length)
     result = model.fit(train_X, train_labels, epochs=20, batch_size=32)
     print(result.history)
-    model.save('junk_remover_model.h5')
+    model.save(model_file)
+    print("saved model:", model_file)
 
 
 def train(data, labels, max_length, glove_handler, gv_dim=100):
@@ -206,19 +209,21 @@ def train(data, labels, max_length, glove_handler, gv_dim=100):
     train_model(Xs, labels, max_length=max_length, gv_dim=gv_dim)
 
 
-def train_full(data, labels, max_length, glove_handler, gv_dim=100):
+def train_full(data, labels, max_length, glove_handler, model_file, gv_dim=100):
     Xs = prep_data(data, max_length, glove_handler, gv_dim=gv_dim)
-    train_model_full(Xs, labels, max_length=max_length, gv_dim=gv_dim)
+    train_model_full(Xs, labels, model_file, max_length=max_length, gv_dim=gv_dim)
 
 
-def filter(xml_file, nlp, glove_handler, threshold = 0.5):
+def filter(xml_file, nlp, glove_handler, out_xml_file,
+        model_file='junk_remover_model.h5', threshold = 0.5):
     max_length = 100
     gv_dim = 100
     #model = build_LSTM_model(max_length=max_length)
     #model.load('junk_remover_model.h5')
-    model = keras.models.load_model('junk_remover_model.h5')
+    model = keras.models.load_model(model_file)
     # model._make_predict_function()
     page_sections = extract_page_sections(xml_file)
+    top = Element('pdf')
     for page_idx, sections in page_sections.items():
         assert len(sections) == 1
         data, labels = prepare_section_tr_data(sections, nlp, max_length)
@@ -226,14 +231,69 @@ def filter(xml_file, nlp, glove_handler, threshold = 0.5):
         pred_X = pred_X.reshape(len(labels), max_length, gv_dim)
         y_preds = model.predict(pred_X)
         lines = sections[0].lines
+        content = ""
         for i, ypred in enumerate(y_preds):
             if ypred > threshold:
                 print(lines[i])
+                content += lines[i] + "\n"
+        page_el = SubElement(top, 'page')
+        page_el.text = content
         print('-'*80)
+
+    utils.indent(top)
+    out_tree = ET.ElementTree(top)
+    out_tree.write(out_xml_file, encoding="UTF-8")
+    print("wrote file:", out_xml_file)
     print('done.')
 
 
-if __name__ == '__main__':
+def usage(parser):
+    import sys
+    parser.print_help(sys.stderr)
+    sys.exit(1)
+
+
+def main():
+    desc = '''
+    This tool learns what is considered as junk in text extracted
+    from textbooks/articles in PDF format to cleanup `hocr2pages.py`
+    generated XML files.
+    '''
+    parser = argparse.ArgumentParser(description=desc)
+    parser.add_argument('-c', action='store', help="one of train or clean",
+            required=True)
+    parser.add_argument('-i', action='store', help="input XML file", required=True)
+    parser.add_argument('-o', action='store', help="cleaned XML file (in clean mode)")
+    parser.add_argument('-m', action='store', help="classifier model file")
+    args = parser.parse_args()
+
+    cmd = args.c
+    if cmd != 'train' and cmd != 'clean':
+        usage(parser)
+
+    in_file = args.i
+
+    home = expanduser("~")
+    db_file = home + "/medline_glove_v2.db"
+    model_file = args.m if args.m else 'junk_remover_model.h5'
+
+    nlp = spacy.load("en_core_web_sm")
+    print("loaded spacy.")
+    glove_handler = GloveHandler(db_file)
+    max_length= 100
+
+    if cmd == 'train':
+        training_sections = extract_sections(in_file)
+        data, labels = prepare_section_tr_data(training_sections, nlp, max_length)
+        train_full(data, labels, max_length, glove_handler, model_file)
+    else:
+        if not args.o:
+            usage(parser)
+        out_xml_file = args.o
+        filter(in_file, nlp, glove_handler, out_xml_file, model_file=model_file)
+
+
+def test_driver():
     home = expanduser("~")
     db_file = home + "/medline_glove_v2.db"
     # extract_sections('3_Cholinergic_Receptors.xml')
@@ -243,7 +303,12 @@ if __name__ == '__main__':
     glove_handler = GloveHandler(db_file)
     max_length= 100
     # data, labels = prepare_section_tr_data(training_sections, nlp, max_length)
-    # train_full(data, labels, max_length, glove_handler)
-    filter('SECTION_V_THE_RESPIRATORY_SYSTEM.xml', nlp, glove_handler)
+    # train_full(data, labels, 'junk_remover_model.h5',  max_length, glove_handler)
+    filter('SECTION_V_THE_RESPIRATORY_SYSTEM.xml', nlp, glove_handler,
+           '/tmp/x.xml')
+
+
+if __name__ == '__main__':
+    main()
 
 
