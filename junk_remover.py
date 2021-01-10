@@ -1,10 +1,12 @@
 import argparse
+import pickle
 import spacy
 import keras
 from keras.models import Sequential
-from keras.layers import Dense, Dropout, Flatten
-from keras.layers import LSTM
-from keras.models import Model
+from keras.layers import Dense, Flatten
+from keras.layers import LSTM, Bidirectional
+# from keras.models import Model
+from sklearn.metrics import precision_recall_curve
 
 import numpy as np
 from xml.etree.ElementTree import Element, SubElement
@@ -20,7 +22,7 @@ class Section(object):
         self.sec_type = sec_type
         self.lines = lines
         self.prev_line = prev_line
-        self.next_line  = next_line
+        self.next_line = next_line
 
     def size(self):
         return len(self.lines)
@@ -82,7 +84,7 @@ def extract_sections(xml_file):
         if has_bad_sections(sections):
             training_sections.extend(sections)
         page_sections[count] = sections
-        count +=1
+        count += 1
     return training_sections
 
 
@@ -94,7 +96,7 @@ def extract_page_sections(xml_file):
         sections = []
         handle_page(node, sections)
         page_sections[count] = sections
-        count +=1
+        count += 1
     return page_sections
 
 
@@ -106,38 +108,38 @@ def has_bad_sections(sections):
 
 
 def handle_page(node, sections):
-   lines = node.text.split("\n")
-   print(len(lines))
-   num_lines = len(lines)
-   offset = 0
-   i = 0
-   while i < num_lines:
-       line = lines[i]
-       if  line.startswith('{junk}'):
-           prev_line = lines[i-1] if i > 0 else None
-           if i > 0:
-               sections.append(create_before_section(i, offset, lines,
-                           'good'))
-           j = i
-           while True:
-               if lines[j].endswith('{junk}'):
-                   j += 1
-                   break
-               elif j+1 >= num_lines:
-                   break
-               j += 1
-           next_line = lines[j] if j < num_lines else None
-           body = [l.replace('{junk}','') for l in  lines[i:j]]
-           section = Section('bad', body, prev_line, next_line)
-           sections.append(section)
-           offset = j
-           i = offset
-       i += 1
+    lines = node.text.split("\n")
+    print(len(lines))
+    num_lines = len(lines)
+    offset = 0
+    i = 0
+    while i < num_lines:
+        line = lines[i]
+        if line.startswith('{junk}'):
+            prev_line = lines[i-1] if i > 0 else None
+            if i > 0:
+                sections.append(create_before_section(i, offset, lines,
+                                                      'good'))
+            j = i
+            while True:
+                if lines[j].endswith('{junk}'):
+                    j += 1
+                    break
+                elif j+1 >= num_lines:
+                    break
+                j += 1
+            next_line = lines[j] if j < num_lines else None
+            body = [l.replace('{junk}', '') for l in lines[i:j]]
+            section = Section('bad', body, prev_line, next_line)
+            sections.append(section)
+            offset = j
+            i = offset
+        i += 1
 
-   if offset < num_lines:
-       prev_line = lines[offset-1] if offset > 0 else None
-       section = Section("good", lines[offset:num_lines], prev_line, None)
-       sections.append(section)
+    if offset < num_lines:
+        prev_line = lines[offset-1] if offset > 0 else None
+        section = Section("good", lines[offset:num_lines], prev_line, None)
+        sections.append(section)
 
 
 def create_before_section(i, offset, lines, sec_type):
@@ -150,7 +152,7 @@ def prepare_section_tr_data(training_sections, nlp, max_length):
     data, labels = [], []
     for section in training_sections:
         num_lines = section.size()
-        label  = 1 if section.sec_type == 'good' else 0
+        label = 1 if section.sec_type == 'good' else 0
         for i in range(num_lines):
             instance = section.get_context_window(i, nlp)
             if len(instance) > max_length:
@@ -173,12 +175,17 @@ def prep_data(data, max_length, glove_handler, gv_dim=100):
                 Xs[i, offset:offset+gv_dim] = vec
     return Xs
 
+
 def build_LSTM_model(gv_dim=100, max_length=100):
     model = Sequential()
-    model.add(LSTM(20, dropout=0.1,
-                   recurrent_dropout=0.1,
-                   return_sequences=False,
-                   input_shape=(max_length, gv_dim)))
+    model.add(Bidirectional(LSTM(20, dropout=0.1,
+                                 recurrent_dropout=0.1,
+                                 return_sequences=False),
+                                 input_shape=(max_length, gv_dim)))
+    # model.add(LSTM(20, dropout=0.1,
+    #               recurrent_dropout=0.1,
+    #               return_sequences=False,
+    #               input_shape=(max_length, gv_dim)))
     model.add(Flatten())
     model.add(Dense(1, activation='sigmoid'))
     model.summary()
@@ -195,7 +202,8 @@ def train_model(train_X, train_labels, max_length=100, gv_dim=100):
     print(result.history)
 
 
-def train_model_full(train_X, train_labels, model_file, max_length=100, gv_dim=100):
+def train_model_full(train_X, train_labels, model_file,
+                     max_length=100, gv_dim=100):
     train_X = train_X.reshape(len(train_labels), max_length, gv_dim)
     model = build_LSTM_model(max_length=max_length)
     result = model.fit(train_X, train_labels, epochs=20, batch_size=32)
@@ -209,17 +217,53 @@ def train(data, labels, max_length, glove_handler, gv_dim=100):
     train_model(Xs, labels, max_length=max_length, gv_dim=gv_dim)
 
 
-def train_full(data, labels, max_length, glove_handler, model_file, gv_dim=100):
+def train_full(data, labels, max_length, glove_handler,
+               model_file, gv_dim=100):
     Xs = prep_data(data, max_length, glove_handler, gv_dim=gv_dim)
-    train_model_full(Xs, labels, model_file, max_length=max_length, gv_dim=gv_dim)
+    train_model_full(Xs, labels, model_file, max_length=max_length,
+                     gv_dim=gv_dim)
+
+
+def evaluate(xml_file, nlp, glove_handler,
+             model_file='junk_remover_model.h5', threshold=0.01):
+    max_length = 100
+    gv_dim = 100
+    model = keras.models.load_model(model_file)
+    page_sections = extract_page_sections(xml_file)
+    preds_all = []
+    labels_all = []
+    y_preds_all = []
+    for page_idx, sections in page_sections.items():
+        data, labels = prepare_section_tr_data(sections, nlp, max_length)
+        pred_X = prep_data(data, max_length, glove_handler, gv_dim=gv_dim)
+        pred_X = pred_X.reshape(len(labels), max_length, gv_dim)
+        y_preds = model.predict(pred_X)
+        # import pdb; pdb.set_trace()
+        labels_all.extend(labels)
+        preds_all.extend([1 if x >= threshold else 0 for x in y_preds])
+        y_preds_all.extend(y_preds)
+    precs, recalls, thresholds = precision_recall_curve(labels_all,
+                                                        y_preds_all)
+    pickle.dump({'precs': precs, 'recalls': recalls, 'thresholds': thresholds},
+                open('good_prc.p', 'wb'))
+    bad_labels = [1 - x for x in labels_all]
+    by_preds = [1.0 - y for y in y_preds_all]
+    precs, recalls, thresholds = precision_recall_curve(bad_labels,
+                                                        by_preds)
+    pickle.dump({'precs': precs, 'recalls': recalls, 'thresholds': thresholds},
+                open('bad_prc.p', 'wb'))
+
+    r = utils.get_perf_results(labels_all, preds_all)
+    print(f"Good P:{r['p_good']:.2f} R:{r['r_good']:.2f} F1:{r['f1_good']:.2f}")
+    print(f"Bad  P:{r['p_bad']:.2f} R:{r['r_bad']:.2f} F1:{r['f1_bad']:.2f}")
 
 
 def filter(xml_file, nlp, glove_handler, out_xml_file,
-        model_file='junk_remover_model.h5', threshold = 0.5):
+           model_file='junk_remover_model.h5', threshold=0.5):
     max_length = 100
     gv_dim = 100
-    #model = build_LSTM_model(max_length=max_length)
-    #model.load('junk_remover_model.h5')
+    # model = build_LSTM_model(max_length=max_length)
+    # model.load('junk_remover_model.h5')
     model = keras.models.load_model(model_file)
     # model._make_predict_function()
     page_sections = extract_page_sections(xml_file)
@@ -260,37 +304,45 @@ def main():
     generated XML files.
     '''
     parser = argparse.ArgumentParser(description=desc)
-    parser.add_argument('-c', action='store', help="one of train or clean",
-            required=True)
-    parser.add_argument('-i', action='store', help="input XML file", required=True)
-    parser.add_argument('-o', action='store', help="cleaned XML file (in clean mode)")
+    parser.add_argument('-c', action='store',
+                        help="one of train, eval or clean",
+                        required=True)
+    parser.add_argument('-i', action='store', help="input XML file",
+                        required=True)
+    parser.add_argument('-o', action='store',
+                        help="cleaned XML file (in clean mode)")
     parser.add_argument('-m', action='store', help="classifier model file")
     args = parser.parse_args()
 
     cmd = args.c
-    if cmd != 'train' and cmd != 'clean':
+    if cmd not in ['train', 'eval', 'clean']:
         usage(parser)
 
     in_file = args.i
 
     home = expanduser("~")
     db_file = home + "/medline_glove_v2.db"
+    db_file = home + "/pmd_2021_01_abstracts_glove.db"
     model_file = args.m if args.m else 'junk_remover_model.h5'
 
     nlp = spacy.load("en_core_web_sm")
     print("loaded spacy.")
     glove_handler = GloveHandler(db_file)
-    max_length= 100
+    max_length = 100
 
     if cmd == 'train':
         training_sections = extract_sections(in_file)
-        data, labels = prepare_section_tr_data(training_sections, nlp, max_length)
+        data, labels = prepare_section_tr_data(training_sections, nlp,
+                                               max_length)
         train_full(data, labels, max_length, glove_handler, model_file)
+    elif cmd == 'eval':
+        evaluate(in_file, nlp, glove_handler, model_file=model_file)
     else:
         if not args.o:
             usage(parser)
         out_xml_file = args.o
-        filter(in_file, nlp, glove_handler, out_xml_file, model_file=model_file)
+        filter(in_file, nlp, glove_handler, out_xml_file,
+               model_file=model_file)
 
 
 def test_driver():

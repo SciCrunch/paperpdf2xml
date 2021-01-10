@@ -16,6 +16,22 @@ For  RedHat/RHEL/ Fedora/ CentOS Linux
 sudo yum install poppler-utils
 ```
 
+* create a Python virtual environment
+```bash
+python3 -m venv ~/pdf_env
+```
+* activate the virtual environment and install dependencies
+```bash
+source ~/pdf_env/bin/activate
+pip install --upgrade pip
+pip install pdftotree==0.2.13
+pip install h5py==2.10.0
+pip install tensorflow
+pip install Keras
+pip install spacy
+python -m spacy download en_core_web_sm
+```
+
 * Install `spacy` NLP library and models (A virtual environment is recommended)
 
 ```bash

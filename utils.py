@@ -221,3 +221,43 @@ def can_line_be_ignored(line, median_sent_len):
     elif ratio < 0.85:
         return True
     return False
+
+
+def get_perf_results(true_labels, preds):
+    """Calculates P, R, F1 both for good and bad labels"""
+    n_bad_correct, n_bad_predicted, n_bad_gold = 0, 0, 0
+    n_good_correct, n_good_predicted, n_good_gold = 0, 0, 0
+    for y_true, pred in zip(true_labels, preds):
+        if y_true == 1:
+            n_good_gold += 1
+            if pred == 1:
+                n_good_predicted += 1
+                if pred == y_true:
+                    n_good_correct += 1
+            else:
+                n_bad_predicted += 1
+        else:
+            n_bad_gold += 1
+            if pred == 0:
+                n_bad_predicted += 1
+                if pred == y_true:
+                    n_bad_correct += 1
+            else:
+                n_good_predicted += 1
+    if n_good_correct == 0:
+        p_good, r_good, f1_good = 0, 0, 0
+    else:
+        p_good = 100.0 * n_good_correct / n_good_predicted
+        r_good = 100.0 * n_good_correct / n_good_gold
+        f1_good = 2 * p_good * r_good / (p_good + r_good)
+
+    if n_bad_correct == 0:
+        p_bad, r_bad, f1_bad = 0, 0, 0
+    else:
+        p_bad = 100.0 * n_bad_correct / n_bad_predicted
+        r_bad = 100.0 * n_bad_correct / n_bad_gold
+        f1_bad = 2 * p_bad * r_bad / (p_bad + r_bad)
+
+    return {'p_good': p_good, 'r_good': r_good,
+            'f1_good': f1_good, 'p_bad': p_bad,
+            'r_bad': r_bad, 'f1_bad': f1_bad}
