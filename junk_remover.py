@@ -3,10 +3,13 @@ import pickle
 import spacy
 import keras
 from keras.models import Sequential
-from keras.layers import Dense, Flatten
+from keras.layers import Dense, Flatten, Concatenate, GlobalMaxPooling1D, GlobalAveragePooling1D
 from keras.layers import LSTM, Bidirectional
 # from keras.models import Model
 from sklearn.metrics import precision_recall_curve
+
+from keras_self_attention import SeqSelfAttention
+
 
 import numpy as np
 from xml.etree.ElementTree import Element, SubElement
@@ -176,6 +179,22 @@ def prep_data(data, max_length, glove_handler, gv_dim=100):
     return Xs
 
 
+def build_attention_model(gv_dim=100, max_length=100):
+    model = Sequential()
+    model.add(LSTM(20, dropout=0.1,
+                   recurrent_dropout=0.1,
+                   return_sequences=True,
+                   input_shape=(max_length, gv_dim)))
+    # model.add(SeqSelfAttention())
+    # model.add(GlobalAveragePooling1D())
+    model.add(Flatten())
+    model.add(Dense(1, activation='sigmoid'))
+    model.summary()
+    model.compile(loss="binary_crossentropy", optimizer="rmsprop",
+                  metrics=['acc'])
+    return model
+
+
 def build_LSTM_model(gv_dim=100, max_length=100):
     model = Sequential()
     model.add(Bidirectional(LSTM(20, dropout=0.1,
@@ -196,7 +215,8 @@ def build_LSTM_model(gv_dim=100, max_length=100):
 
 def train_model(train_X, train_labels, max_length=100, gv_dim=100):
     train_X = train_X.reshape(len(train_labels), max_length, gv_dim)
-    model = build_LSTM_model(max_length=max_length)
+    # model = build_LSTM_model(max_length=max_length)
+    model = build_attention_model(max_length=max_length)
     result = model.fit(train_X, train_labels, epochs=20, batch_size=32,
                        validation_split=0.1)
     print(result.history)
@@ -205,10 +225,12 @@ def train_model(train_X, train_labels, max_length=100, gv_dim=100):
 def train_model_full(train_X, train_labels, model_file,
                      max_length=100, gv_dim=100):
     train_X = train_X.reshape(len(train_labels), max_length, gv_dim)
-    model = build_LSTM_model(max_length=max_length)
+    # model = build_LSTM_model(max_length=max_length)
+    model = build_attention_model(max_length=max_length)
     result = model.fit(train_X, train_labels, epochs=20, batch_size=32)
     print(result.history)
     model.save(model_file)
+    # model.save_weights(model_file)
     print("saved model:", model_file)
 
 
@@ -228,7 +250,13 @@ def evaluate(xml_file, nlp, glove_handler,
              model_file='junk_remover_model.h5', threshold=0.01):
     max_length = 100
     gv_dim = 100
-    model = keras.models.load_model(model_file)
+    # model = build_LSTM_model(max_length=max_length)
+    # model = build_attention_model(max_length=max_length)
+    # model.load_weights(model_file)
+    model = keras.models.load_model(model_file,
+                                    custom_objects=SeqSelfAttention.get_custom_objects())
+    # orig
+    # model = keras.models.load_model(model_file)
     page_sections = extract_page_sections(xml_file)
     preds_all = []
     labels_all = []
@@ -256,6 +284,7 @@ def evaluate(xml_file, nlp, glove_handler,
     r = utils.get_perf_results(labels_all, preds_all)
     print(f"Good P:{r['p_good']:.2f} R:{r['r_good']:.2f} F1:{r['f1_good']:.2f}")
     print(f"Bad  P:{r['p_bad']:.2f} R:{r['r_bad']:.2f} F1:{r['f1_bad']:.2f}")
+    return r
 
 
 def filter(xml_file, nlp, glove_handler, out_xml_file,

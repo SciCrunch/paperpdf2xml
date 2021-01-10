@@ -1,9 +1,15 @@
 from xml.etree.ElementTree import Element, SubElement
 import xml.etree.ElementTree as ET
 import os.path
+from os.path import join
+import spacy
+
 import utils
 import numpy as np
 from junk_remover import extract_page_sections
+from junk_remover import extract_sections, prepare_section_tr_data, train_full
+from junk_remover import evaluate
+from glove_handler import GloveHandler
 
 
 class PageStats(object):
@@ -71,13 +77,45 @@ def prep_splits(pg_list, out_dir, prefix):
         write_page_range(test_file, pg_list, i, len(pg_list))
 
 
+def train_test_splits(out_dir, prefix, result_file):
+    import glob
+    home = os.path.expanduser("~")
+    db_file = home + "/pmd_2021_01_abstracts_glove.db"
+    nlp = spacy.load("en_core_web_sm")
+    print("loaded spacy.")
+    glove_handler = GloveHandler(db_file)
+    max_length = 100
+    models_dir = join(out_dir, 'models')
+    if not os.path.exists(models_dir):
+        os.makedirs(models_dir)
+
+    with open(result_file, 'w') as f:
+        for i in range(1, 10):
+            tr_file = glob.glob(out_dir + '/*train_' + str(i) + '[0-9].xml')[0]
+            tst_file = glob.glob(out_dir + '/*test_' + str(i) + '[0-9].xml')[0]
+            print(tr_file, tst_file)
+            split_perc = tr_file.split('.')[-2][-2:]
+            model_file = join(models_dir, 'split_model_' + split_perc + ".h5")
+            print(model_file)
+            comp = 100 - int(split_perc)
+            f.write("{}/{} split\n".format(split_perc, str(comp)))
+            training_sections = extract_sections(tr_file)
+            data, labels = prepare_section_tr_data(training_sections, nlp,
+                                                   max_length)
+            train_full(data, labels, max_length, glove_handler, model_file)
+            # evaluate
+            r = evaluate(tst_file, nlp, glove_handler, model_file=model_file)
+            print(f"Good P:{r['p_good']:.2f} R:{r['r_good']:.2f} F1:{r['f1_good']:.2f}", file=f)
+            print(f"Bad  P:{r['p_bad']:.2f} R:{r['r_bad']:.2f} F1:{r['f1_bad']:.2f}", file=f)
+
+
+
+
+
 if __name__ == '__main__':
-    in_file = 'data/annotations/Unit_IX_The_Nervous_System_A.xml'
-    pg_list = prep_page_stats(in_file)
-    prep_splits(pg_list, '/tmp/splits', 'nervous_system_a')
-
-
-
-
-
+    # in_file = 'data/annotations/Unit_IX_The_Nervous_System_A.xml'
+    # pg_list = prep_page_stats(in_file)
+    # prep_splits(pg_list, '/tmp/splits', 'nervous_system_a')
+    train_test_splits('/tmp/splits', 'nervous_system_a',
+                      "full_seq_model_results.txt")
 
