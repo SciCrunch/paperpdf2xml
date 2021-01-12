@@ -174,6 +174,11 @@ def prep_data(data, max_length, glove_handler, gv_dim=100):
             if vec:
                 Xs[i, offset:offset+gv_dim] = vec
             else:
+                #if utils.get_ascii_ratio(token) <= 0.5:
+                #    vec = glove_handler.get_glove_vec('unk2')
+                #elif utils.is_mostly_numbers(token):
+                #    vec = glove_handler.get_glove_vec('unk3')
+                #else:
                 vec = glove_handler.get_glove_vec('unk1')
                 Xs[i, offset:offset+gv_dim] = vec
     return Xs
@@ -200,7 +205,7 @@ def build_LSTM_model(gv_dim=100, max_length=100):
     model.add(Bidirectional(LSTM(20, dropout=0.1,
                                  recurrent_dropout=0.1,
                                  return_sequences=False),
-                                 input_shape=(max_length, gv_dim)))
+                            input_shape=(max_length, gv_dim)))
     # model.add(LSTM(20, dropout=0.1,
     #               recurrent_dropout=0.1,
     #               return_sequences=False,
@@ -215,8 +220,8 @@ def build_LSTM_model(gv_dim=100, max_length=100):
 
 def train_model(train_X, train_labels, max_length=100, gv_dim=100):
     train_X = train_X.reshape(len(train_labels), max_length, gv_dim)
-    # model = build_LSTM_model(max_length=max_length)
-    model = build_attention_model(max_length=max_length)
+    model = build_LSTM_model(max_length=max_length)
+    # model = build_attention_model(max_length=max_length)
     result = model.fit(train_X, train_labels, epochs=20, batch_size=32,
                        validation_split=0.1)
     print(result.history)
@@ -225,8 +230,8 @@ def train_model(train_X, train_labels, max_length=100, gv_dim=100):
 def train_model_full(train_X, train_labels, model_file,
                      max_length=100, gv_dim=100):
     train_X = train_X.reshape(len(train_labels), max_length, gv_dim)
-    # model = build_LSTM_model(max_length=max_length)
-    model = build_attention_model(max_length=max_length)
+    model = build_LSTM_model(max_length=max_length)
+    # model = build_attention_model(max_length=max_length)
     result = model.fit(train_X, train_labels, epochs=20, batch_size=32)
     print(result.history)
     model.save(model_file)
@@ -350,7 +355,7 @@ def main():
     in_file = args.i
 
     home = expanduser("~")
-    db_file = home + "/medline_glove_v2.db"
+    # db_file = home + "/medline_glove_v2.db"
     db_file = home + "/pmd_2021_01_abstracts_glove.db"
     model_file = args.m if args.m else 'junk_remover_model.h5'
 
@@ -391,5 +396,4 @@ def test_driver():
 
 if __name__ == '__main__':
     main()
-
 

@@ -68,7 +68,7 @@ def is_figure_text(line_toks, nlp):
     if len(line_toks) >= 5:
         return False
     has_title_case = False
-    has_verb  = False
+    has_verb = False
     num_nouns = 0
     has_period = False
     line = " ".join(line_toks)
@@ -91,7 +91,6 @@ def is_figure_text(line_toks, nlp):
     if not has_verb and not has_period and noun_frac >= 0.5:
         return True
     return False
-
 
 
 def is_heading(line, nlp):
